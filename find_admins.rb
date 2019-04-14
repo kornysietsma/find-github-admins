@@ -192,6 +192,7 @@ GRAPHQL
         result = get_all_teams_from_github
         admin_teams_list = filter_teams_list(result)
         team_members = get_team_members(admin_teams_list).map {|member| member['node']}
+        return team_members.uniq
       end
     end
   end
@@ -207,7 +208,8 @@ if __FILE__ == $0
   admins = GithubRepositories::RepositoryAdmins.new(orgname, reponame)
 
   puts "Admins for the #{reponame} repository:"
-  admins.get_admin_users.each do |admin|
+  admin_list = admins.get_admin_users.sort_by{ |elem| elem['login'].downcase }
+  admin_list.each do |admin|
     namestr = admin['name'] || "(no name)"
     puts "#{admin['login']} - #{namestr}"
   end

@@ -18,8 +18,9 @@ $ export GITHUB_TOKEN=adfasdfasdfgasdfasdf
 $ ./find_admins.rb MyOrganisation my-repo-name
 ```
 
-If you have rights to read the repo info, it should print all the repo admins -
-github login, and full name if they've supplied it.
+If you have write/push access the repo, it should print all the repo admins - github login, and full name if they've supplied it.
+
+If you only have read access, it will still attempt to find some admins by iterating over the list of public teams and seeing if any of these teams are administrators on the repo in question, but this method is less accurate than the first.
 
 ## License
 Written in 2018 by Kornelis Sietsma korny@sietsma.com
