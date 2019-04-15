@@ -52,6 +52,54 @@ query($orgname: String!, $repo: String!, $cursor: String) {
   }
   GRAPHQL
 
+TEAMS_QUERY = CLIENT.parse <<-'GRAPHQL'
+query ($orgname: String!, $repo: String!, $cursor: String) {
+  organization(login: $orgname) {
+    teams(first:100, after: $cursor) {
+      pageInfo {
+       endCursor
+      }
+      edges {
+        node {
+          name
+          id
+          repositories(first: 100, query: $repo) {
+            edges  {
+              node {
+                name
+              }
+            permission 
+            }
+          }
+        }
+      }
+    }
+  }
+}
+GRAPHQL
+
+MEMBERS_QUERY = CLIENT.parse <<-'GRAPHQL'
+query ($node_id: ID!, $cursor: String) {
+  node(id: $node_id) {
+   ... on Team {
+      members(first:100, after: $cursor) {
+        pageInfo {
+          endCursor
+        }
+        edges {
+          node {
+            name
+            login
+          }
+        }
+      }
+    }
+  }
+}
+GRAPHQL
+
+  class NestedKeyEmpty < StandardError  
+  end  
 
   class RepositoryAdmins
 
@@ -67,11 +115,11 @@ query($orgname: String!, $repo: String!, $cursor: String) {
       end
       rval = response.data.to_h.dig(*properties.map {|p| p.to_s})
       unless rval
-        puts "can't find nested field #{properties.join(',')} in query with params:"
-        pp variables
-        puts "response was:"
-        pp response.data.to_h
-        raise "No response entry for nested keys #{properties.join(',')}"
+        # puts "can't find nested field #{properties.join(',')} in query with params:"
+        # pp variables
+        # puts "response was:"
+        # pp response.data.to_h
+        raise NestedKeyEmpty, "No response entry for nested keys #{properties.join(',')}"
       end
       rval
     end
@@ -105,13 +153,47 @@ query($orgname: String!, $repo: String!, $cursor: String) {
       edges
     end
 
+    def filter_teams_list(teams_list)
+      result = []
+      teams_with_repo_permission = teams_list.select {|node| !node["node"]["repositories"]["edges"].empty?}
+      teams_with_repo_permission.each do |team|
+        team["node"]["repositories"]["edges"].each do |repo|
+          if @reponame == repo["node"]["name"] and "ADMIN" == repo["permission"]
+            team_result = Hash["name" => team["node"]["name"], "node_id" => team["node"]["id"]]
+            result << team_result
+          end
+        end
+      end
+      return result
+    end
+
+    def get_team_members(team_list)
+      team_members = []
+      team_list.each do |team|
+        team_members.concat paginated_query(MEMBERS_QUERY, {node_id: team["node_id"]}, :node, :members)
+      end
+      team_members
+    end
+
     def get_all_owners_from_github()
       paginated_query(REPO_QUERY, {orgname: @orgname, repo: @reponame}, :organization, :repository, :collaborators)
     end
 
+    def get_all_teams_from_github()
+      paginated_query(TEAMS_QUERY, {orgname: @orgname, repo: @reponame}, :organization, :teams)
+    end
+
     def get_admin_users()
-      get_all_owners_from_github.select {|collaborator| collaborator['permission'] == 'ADMIN' }
+      begin
+        get_all_owners_from_github.select {|collaborator| collaborator['permission'] == 'ADMIN' }
         .map {|collaborator| collaborator['node']}
+      rescue NestedKeyEmpty
+        puts "Failed with normal approach, attempting to lookup admins via teams..."
+        result = get_all_teams_from_github
+        admin_teams_list = filter_teams_list(result)
+        team_members = get_team_members(admin_teams_list).map {|member| member['node']}
+        return team_members.uniq
+      end
     end
   end
 end
@@ -126,7 +208,8 @@ if __FILE__ == $0
   admins = GithubRepositories::RepositoryAdmins.new(orgname, reponame)
 
   puts "Admins for the #{reponame} repository:"
-  admins.get_admin_users.each do |admin|
+  admin_list = admins.get_admin_users.sort_by{ |elem| elem['login'].downcase }
+  admin_list.each do |admin|
     namestr = admin['name'] || "(no name)"
     puts "#{admin['login']} - #{namestr}"
   end
